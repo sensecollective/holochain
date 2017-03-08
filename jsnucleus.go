@@ -142,7 +142,7 @@ func (z *JSNucleus) Call(iface string, params interface{}) (result interface{}, 
 	case STRING:
 		code = fmt.Sprintf(`%s("%s");`, iface, sanitizeString(params.(string)))
 	case JSON:
-		code = fmt.Sprintf(`JSON.stringify(%s(JSON.parse("%s")));`, iface, sanitizeString(params.(string)))
+		code = fmt.Sprintf(`result = %s(JSON.parse("%s"));`, iface, sanitizeString(params.(string)))
 	default:
 		err = errors.New("params type not implemented")
 		return
@@ -150,17 +150,30 @@ func (z *JSNucleus) Call(iface string, params interface{}) (result interface{}, 
 	log.Debugf("JS Call:\n%s", code)
 	var v otto.Value
 	v, err = z.vm.Run(code)
-	if err == nil {
-		if v.IsObject() && v.Class() == "Error" {
+	if v.IsObject() {
+		name, _ := v.Object().Get("name")
+		log.Debugf("Got object from JS context with name: %s", name)
+		if name.String() == "HolochainError" {
 			log.Debugf("JS Error:\n%v", v)
 			var message otto.Value
 			message, err = v.Object().Get("message")
 			if err == nil {
 				err = errors.New(message.String())
+				return
 			}
 		} else {
-			result, err = v.ToString()
+			content, _ := v.Object().Get("content")
+			log.Debugf("content: %s", content)
 		}
+	}
+
+	v, err = z.vm.Run("JSON.stringify(result)")
+	log.Debugf("JS stringified return value:%v", v)
+
+	result, err = v.ToString()
+
+	if result == "undefined" {
+		result = ""
 	}
 	return
 }
