@@ -50,6 +50,19 @@ function isAllowed(author) {
   return false;
 }
 
+function isValidRoom(room) {
+  var rooms = getmeta(property("_id"), "room");
+  if( rooms instanceof Error ){
+      return false
+  } else {
+    rooms = rooms.Entries
+    for( i=0; i<rooms.length; i++) {
+      if( rooms[i]["H"] == room) return true
+    }
+    return false
+  }
+}
+
 function genesis() {
   return true;
 }
@@ -59,6 +72,15 @@ function validate(entry_type, entry, validation_props) {
   if( validation_props.MetaTag ) { //validating a putmeta
     return true;
   } else { //validating a commit or put
-    return isAllowed(validation_props.Sources[0])
+    if( !isValidRoom(entry.room) ) {
+      debug("message not valid because room "+entry.room+" does not exist")
+      return false
+    }
+    if( isAllowed(validation_props.Sources[0]) ) {
+      debug("message \""+entry.content+"\" valid and added to room "+entry.room)
+      return true
+    } else {
+      return false
+    }
   }
 }

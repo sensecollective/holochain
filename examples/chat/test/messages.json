@@ -14,6 +14,20 @@
     "Err":""
   },
   {
+    "Zome":"messages",
+    "FnName":"newMessage",
+    "Input":"{\"content\":\"hallo\",\"room\":\"asdf\"}",
+    "Regexp":"\\{\"message\":\"Invalid entry: \\{\\\\\"content\\\\\":\\\\\"hallo\\\\\",\\\\\"room\\\\\":\\\\\"asdf\\\\\",\\\\\"timestamp\\\\\":\\\\\"[^(\\\")]*\\\\\"\\}\",\"name\":\"HolochainError\"\\}",
+    "Err":""
+  },
+  {
+    "Zome":"messages",
+    "FnName":"listMessages",
+    "Input":"",
+    "Output":"[]",
+    "Err":""
+  },
+  {
     "Zome":"rooms",
     "FnName":"newRoom",
     "Input":"{\"name\":\"general\", \"purpose\":\"everything goes in here\"}",
