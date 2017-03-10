@@ -5,9 +5,10 @@ function listMessages(room) {
   if( messages instanceof Error ) {
     return []
   } else {
+    messages = messages.Entries
     var return_messages = new Array(messages.length);
     for( i=0; i<messages.length; i++) {
-      return_messages[i] = JSON.parse(messages[i]["C"])
+      return_messages[i] = JSON.parse(messages[i]["E"]["C"])
     }
     return return_messages
   }
@@ -38,9 +39,11 @@ function modMessage(x, old_message) {
 function isAllowed(author) {
   debug("Checking if "+author+" is a registered user...")
   var registered_users = getmeta(property("_id"), "registered_users");
+  if( registered_users instanceof Error ) return false;
+  registered_users = registered_users.Entries
   for(var i=0; i < registered_users.length; i++) {
-    var profile = JSON.parse(registered_users[i]["C"])
-    debug("Registered user "+i+" is " + profile.username)
+    var profile = JSON.parse(registered_users[i]["E"]["C"])
+    //debug("Registered user "+i+" is " + profile.username)
     if( profile.agent_id == author) return true;
   }
   return false;

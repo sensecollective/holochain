@@ -5,9 +5,10 @@ function listRooms() {
   if( rooms instanceof Error ){
       return []
   } else {
+    rooms = rooms.Entries
     var return_rooms = new Array(rooms.length);
     for( i=0; i<rooms.length; i++) {
-      return_rooms[i] = JSON.parse(rooms[i]["C"])
+      return_rooms[i] = JSON.parse(rooms[i]["E"]["C"])
     }
     return return_rooms
   }
@@ -23,11 +24,14 @@ function newRoom(x) {
 }
 
 function isAllowed(author) {
-  debug("Checking if "+author+" is a registered user...")
-  var registered_users = getmeta(property("_id"), "registered_users");
+  //debug("Checking if "+author+" is a registered user...")
+  var registered_users = getmeta(property("_id"), "registered_users")
+  if( registered_users instanceof Error ) return false
+  registered_users = registered_users.Entries
+  //debug("Registered users are: "+JSON.stringify(registered_users))
   for(var i=0; i < registered_users.length; i++) {
-    var profile = JSON.parse(registered_users[i]["C"])
-    debug("Registered user "+i+" is " + profile.username)
+    var profile = JSON.parse(registered_users[i]["E"]["C"])
+    //debug("Registered user "+i+" is " + profile.username)
     if( profile.agent_id == author) return true;
   }
   return false;

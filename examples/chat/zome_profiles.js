@@ -9,10 +9,12 @@ function register(x) {
 
 expose("isRegistered", HC.JSON);
 function isRegistered() {
-  var registered_users = getmeta(property("_id"), "registered_users");
+  var registered_users = getmeta(property("_id"), "registered_users")
+  if( registered_users instanceof Error) return false
+  registered_users = registered_users.Entries
   var agent_id = property("_agent_id")
   for(var i=0; i < registered_users.length; i++) {
-    var profile = JSON.parse(registered_users[i]["C"])
+    var profile = JSON.parse(registered_users[i]["E"]["C"])
     debug("Registered user "+i+" is " + profile.username)
     if( profile.agent_id == agent_id) return true;
   }
@@ -28,9 +30,11 @@ function getProfile(x) {
 expose("myProfile", HC.JSON);
 function myProfile() {
   var registered_users = getmeta(property("_id"), "registered_users");
+  if( registered_users instanceof Error ) return false
+  registered_users = registered_users.Entries
   var agent_id = property("_agent_id")
   for(var i=0; i < registered_users.length; i++) {
-    var profile = JSON.parse(registered_users[i]["C"])
+    var profile = JSON.parse(registered_users[i]["E"]["C"])
     debug("Registered user "+i+" is " + profile.username)
     if( profile.agent_id == agent_id) return profile;
   }
