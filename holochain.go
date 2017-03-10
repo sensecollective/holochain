@@ -1261,7 +1261,7 @@ func (h *Holochain) Test() []error {
 						if expectedResultRegexp != "" {
 							log.Debugf("Test %s matching against regexp...", testID)
 							expectedResultRegexp = h.TestStringReplacements(expectedResultRegexp, r1, r2, r3)
-							comparisonString = fmt.Sprintf("\nTest: %s\n\tExpected regexp:\t%v\n\tGot:\t\t%v", testID, expectedResultRegexp, resultString)
+							comparisonString = fmt.Sprintf("\nTest: %s\n\tExpected regexp:\t%v\n\tGot:\t\t\t%v", testID, expectedResultRegexp, resultString)
 							var matchError error
 							match, matchError = regexp.MatchString(expectedResultRegexp, resultString)
 							//match, matchError = regexp.MatchString("[0-9]", "7")
