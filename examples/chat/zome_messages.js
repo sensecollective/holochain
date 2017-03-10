@@ -9,6 +9,7 @@ function listMessages(room) {
     var return_messages = new Array(messages.length);
     for( i=0; i<messages.length; i++) {
       return_messages[i] = JSON.parse(messages[i]["E"]["C"])
+      return_messages[i].id = messages[i]["H"]
     }
     return return_messages
   }

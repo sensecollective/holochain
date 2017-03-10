@@ -9,6 +9,7 @@ function listRooms() {
     var return_rooms = new Array(rooms.length);
     for( i=0; i<rooms.length; i++) {
       return_rooms[i] = JSON.parse(rooms[i]["E"]["C"])
+      return_rooms[i].id = rooms[i]["H"]
     }
     return return_rooms
   }

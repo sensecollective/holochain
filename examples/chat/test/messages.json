@@ -45,7 +45,7 @@
     "Zome":"messages",
     "FnName":"listMessages",
     "Input":"\"%r2%\"",
-    "Regexp":"^\\[\\{\"content\":\"bla\",\"room\":\"%r2%\",\"timestamp\":\"[^\"]*\"\\}\\]$",
+    "Regexp":"^\\[\\{\"content\":\"bla\",\"id\":\"%r1%\",\"room\":\"%r2%\",\"timestamp\":\"[^\"]*\"\\}\\]$",
     "Err":""
   }
 ]
