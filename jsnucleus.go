@@ -336,6 +336,7 @@ func NewJSNucleus(h *Holochain, code string) (n Nucleus, err error) {
 			var metakey Hash
 			metakey, err = NewHash(metahashstr)
 			if err == nil {
+				time.Sleep(1 * time.Second)
 				err = h.dht.SendPutMeta(MetaReq{O: key, M: metakey, T: typestr})
 			}
 		}
