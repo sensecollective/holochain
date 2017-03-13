@@ -13,12 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/boltdb/bolt"
-	"github.com/fatih/color"
 	"github.com/google/uuid"
 	ic "github.com/libp2p/go-libp2p-crypto"
 	peer "github.com/libp2p/go-libp2p-peer"
 	mh "github.com/multiformats/go-multihash"
-	"github.com/op/go-logging"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -29,7 +27,8 @@ import (
 	"time"
 )
 
-const Version string = "0.0.1"
+const Version int = 2
+const VersionStr string = "2"
 
 // KeyEntry structure for building KeyEntryType entries
 type KeyEntry struct {
@@ -48,12 +47,23 @@ type Zome struct {
 	NucleusType string
 }
 
+// Loggers holds the logging structures for the different parts of the system
+type Loggers struct {
+	App        Logger
+	DHT        Logger
+	Gossip     Logger
+	TestPassed Logger
+	TestFailed Logger
+	TestInfo   Logger
+}
+
 // Config holds the non-DNA configuration for a holo-chain
 type Config struct {
 	Port            int
 	PeerModeAuthor  bool
 	PeerModeDHTNode bool
 	BootstrapServer string
+	Loggers         Loggers
 }
 
 // Holochain struct holds the full "DNA" of the holochain
@@ -79,10 +89,27 @@ type Holochain struct {
 	chain          *Chain // the chain itself
 }
 
-var log *logging.Logger
+var debugLog Logger
+var infoLog Logger
+
+func Debug(m string) {
+	debugLog.Log(m)
+}
+
+func Debugf(m string, args ...interface{}) {
+	debugLog.Logf(m, args...)
+}
+
+func Info(m string) {
+	infoLog.Log(m)
+}
+
+func Infof(m string, args ...interface{}) {
+	infoLog.Logf(m, args...)
+}
 
 // Register function that must be called once at startup by any client app
-func Register(logger *logging.Logger) {
+func Register() {
 	gob.Register(Header{})
 	gob.Register(KeyEntry{})
 	gob.Register(Hash{})
@@ -101,10 +128,10 @@ func Register(logger *logging.Logger) {
 	RegisterBultinNucleii()
 	RegisterBultinPersisters()
 
-	log = logger
+	infoLog.New(nil)
+	debugLog.New(nil)
 
 	rand.Seed(time.Now().Unix()) // initialize global pseudo random generator
-
 }
 
 func findDNA(path string) (f string, err error) {
@@ -158,8 +185,8 @@ func (s *Service) Load(name string) (h *Holochain, err error) {
 	return
 }
 
-// New creates a new holochain structure with a randomly generated ID and default values
-func New(agent Agent, path string, format string, zomes ...Zome) Holochain {
+// NewHolochain creates a new holochain structure with a randomly generated ID and default values
+func NewHolochain(agent Agent, path string, format string, zomes ...Zome) Holochain {
 	u, err := uuid.NewUUID()
 	if err != nil {
 		panic(err)
@@ -180,7 +207,7 @@ func New(agent Agent, path string, format string, zomes ...Zome) Holochain {
 
 	h.PrepareHashType()
 	h.Zomes = make(map[string]*Zome)
-	for i, _ := range zomes {
+	for i := range zomes {
 		z := zomes[i]
 		h.Zomes[z.Name] = &z
 	}
@@ -226,6 +253,9 @@ func (s *Service) load(name string, format string) (hP *Holochain, err error) {
 	defer f.Close()
 	err = Decode(f, format, &h.config)
 	if err != nil {
+		return
+	}
+	if err = h.setupConfig(); err != nil {
 		return
 	}
 
@@ -310,7 +340,16 @@ func (h *Holochain) Prepare() (err error) {
 	if err = h.PrepareHashType(); err != nil {
 		return
 	}
-	for _, z := range h.Zomes {
+	for zomeType, z := range h.Zomes {
+		var n Nucleus
+		n, err = h.MakeNucleus(zomeType)
+		if err != nil {
+			return
+		}
+		if err = n.ChainRequires(); err != nil {
+			return
+		}
+
 		if !fileExists(h.path + "/" + z.Code) {
 			return errors.New("DNA specified code file missing: " + z.Code)
 		}
@@ -351,11 +390,11 @@ func (h *Holochain) Activate() (err error) {
 		}
 		e := h.BSpost()
 		if e != nil {
-			log.Debugf("error in BSpost: %s", e.Error())
+			h.dht.dlog.Logf("error in BSpost: %s", e.Error())
 		}
 		e = h.BSget()
 		if e != nil {
-			log.Debugf("error in BSget: %s", e.Error())
+			h.dht.dlog.Logf("error in BSget: %s", e.Error())
 		}
 	}
 	if h.config.PeerModeAuthor {
@@ -453,7 +492,6 @@ func (h *Holochain) GenChain() (keyHash Hash, err error) {
 		return
 	}
 
-	log.Debug("WRITING DNAHASH FILE")
 	if err = writeFile(h.path, DNAHashFileName, []byte(h.dnaHash.String())); err != nil {
 		return
 	}
@@ -518,8 +556,7 @@ func (s *Service) Clone(srcPath string, path string, new bool) (hP *Holochain, e
 		}
 
 		// make a config file
-		err = makeConfig(h, s)
-		if err != nil {
+		if err = makeConfig(h, s); err != nil {
 			return
 		}
 
@@ -586,11 +623,43 @@ type TestData struct {
 	Regexp string
 }
 
-func makeConfig(h *Holochain, s *Service) error {
-	h.config.Port = DefaultPort
-	h.config.PeerModeDHTNode = s.Settings.DefaultPeerModeDHTNode
-	h.config.PeerModeAuthor = s.Settings.DefaultPeerModeAuthor
-	h.config.BootstrapServer = s.Settings.DefaultBootstrapServer
+func (h *Holochain) setupConfig() (err error) {
+	if err = h.config.Loggers.App.New(nil); err != nil {
+		return
+	}
+	if err = h.config.Loggers.DHT.New(nil); err != nil {
+		return
+	}
+	if err = h.config.Loggers.Gossip.New(nil); err != nil {
+		return
+	}
+	if err = h.config.Loggers.TestPassed.New(nil); err != nil {
+		return
+	}
+	if err = h.config.Loggers.TestFailed.New(nil); err != nil {
+		return
+	}
+	if err = h.config.Loggers.TestInfo.New(nil); err != nil {
+		return
+	}
+	return
+}
+
+func makeConfig(h *Holochain, s *Service) (err error) {
+	h.config = Config{
+		Port:            DefaultPort,
+		PeerModeDHTNode: s.Settings.DefaultPeerModeDHTNode,
+		PeerModeAuthor:  s.Settings.DefaultPeerModeAuthor,
+		BootstrapServer: s.Settings.DefaultBootstrapServer,
+		Loggers: Loggers{
+			App:        Logger{Format: "%{color:cyan}%{message}", Enabled: true},
+			DHT:        Logger{Format: "%{color:yellow}%{time} DHT: %{message}"},
+			Gossip:     Logger{Format: "%{color:blue}%{time} Gossip: %{message}"},
+			TestPassed: Logger{Format: "%{color:green}%{message}", Enabled: true},
+			TestFailed: Logger{Format: "%{color:red}%{message}", Enabled: true},
+			TestInfo:   Logger{Format: "%{message}", Enabled: true},
+		},
+	}
 
 	p := h.path + "/" + ConfigFileName + "." + h.encodingFormat
 	f, err := os.Create(p)
@@ -599,7 +668,13 @@ func makeConfig(h *Holochain, s *Service) error {
 	}
 	defer f.Close()
 
-	return Encode(f, h.encodingFormat, &h.config)
+	if err = Encode(f, h.encodingFormat, &h.config); err != nil {
+		return
+	}
+	if err = h.setupConfig(); err != nil {
+		return
+	}
+	return
 }
 
 // GenDev generates starter holochain DNA files from which to develop a chain
@@ -611,32 +686,31 @@ func (s *Service) GenDev(path string, format string) (hP *Holochain, err error) 
 		}
 
 		zomes := []Zome{
-			Zome{Name: "myZome",
+			{Name: "myZome",
 				Description: "this is a zygomas test zome",
 				NucleusType: ZygoNucleusType,
 				Entries: map[string]EntryDef{
-					"myData":  EntryDef{Name: "myData", DataFormat: DataFormatRawZygo},
-					"primes":  EntryDef{Name: "primes", DataFormat: DataFormatJSON},
-					"profile": EntryDef{Name: "profile", DataFormat: DataFormatJSON, Schema: "schema_profile.json"},
+					"myData":  {Name: "myData", DataFormat: DataFormatRawZygo},
+					"primes":  {Name: "primes", DataFormat: DataFormatJSON},
+					"profile": {Name: "profile", DataFormat: DataFormatJSON, Schema: "schema_profile.json"},
 				},
 			},
-			Zome{Name: "jsZome",
+			{Name: "jsZome",
 				Description: "this is a javascript test zome",
 				NucleusType: JSNucleusType,
 				Entries: map[string]EntryDef{
-					"myOdds":  EntryDef{Name: "myOdds", DataFormat: DataFormatRawJS},
-					"profile": EntryDef{Name: "profile", DataFormat: DataFormatJSON, Schema: "schema_profile.json"},
+					"myOdds":  {Name: "myOdds", DataFormat: DataFormatRawJS},
+					"profile": {Name: "profile", DataFormat: DataFormatJSON, Schema: "schema_profile.json"},
 				},
 			},
 		}
 
-		h := New(agent, path, format, zomes...)
+		h := NewHolochain(agent, path, format, zomes...)
 
 		// use the path as the name
 		h.Name = filepath.Base(path)
 
-		err = makeConfig(&h, s)
-		if err != nil {
+		if err = makeConfig(&h, s); err != nil {
 			return
 		}
 
@@ -684,37 +758,37 @@ func (s *Service) GenDev(path string, format string) (hP *Holochain, err error) 
 		}
 
 		fixtures := [7]TestData{
-			TestData{
+			{
 				Zome:   "myZome",
 				FnName: "addData",
 				Input:  "2",
 				Output: "%h%"},
-			TestData{
+			{
 				Zome:   "myZome",
 				FnName: "addData",
 				Input:  "4",
 				Output: "%h%"},
-			TestData{
+			{
 				Zome:   "myZome",
 				FnName: "addData",
 				Input:  "5",
 				Err:    "Error calling 'commit': Invalid entry: 5"},
-			TestData{
+			{
 				Zome:   "myZome",
 				FnName: "addPrime",
 				Input:  "{\"prime\":7}",
 				Output: "\"%h%\""}, // quoted because return value is json
-			TestData{
+			{
 				Zome:   "myZome",
 				FnName: "addPrime",
 				Input:  "{\"prime\":4}",
 				Err:    `Error calling 'commit': Invalid entry: {"Atype":"hash", "prime":4, "zKeyOrder":["prime"]}`},
-			TestData{
+			{
 				Zome:   "jsZome",
 				FnName: "addProfile",
 				Input:  `{"firstName":"Art","lastName":"Brock"}`,
 				Output: `"%h%"`},
-			TestData{
+			{
 				Zome:   "jsZome",
 				FnName: "getProperty",
 				Input:  "_id",
@@ -722,12 +796,12 @@ func (s *Service) GenDev(path string, format string) (hP *Holochain, err error) 
 		}
 
 		fixtures2 := [2]TestData{
-			TestData{
+			{
 				Zome:   "jsZome",
 				FnName: "addOdd",
 				Input:  "7",
 				Output: "%h%"},
-			TestData{
+			{
 				Zome:   "jsZome",
 				FnName: "addOdd",
 				Input:  "2",
@@ -786,7 +860,7 @@ function genesis() {return true}
 			return nil, err
 		}
 
-		for n, _ := range h.Zomes {
+		for n := range h.Zomes {
 			z, _ := h.Zomes[n]
 			switch z.NucleusType {
 			case JSNucleusType:
@@ -1075,7 +1149,7 @@ func (h *Holochain) ValidateEntry(entryType string, entry Entry, props *Validati
 		} else {
 			input = entry
 		}
-		log.Debugf("Validating %v against schema", input)
+		Debugf("Validating %v against schema", input)
 		if err = d.validator.Validate(input); err != nil {
 			return
 		}
@@ -1192,6 +1266,10 @@ func (h *Holochain) TestStringReplacements(input, r1, r2, r3 string) string {
 // This function is useful only in the context of developing a holochain and will return
 // an error if the chain has already been started (i.e. has genesis entries)
 func (h *Holochain) Test() []error {
+	info := h.config.Loggers.TestInfo
+	passed := h.config.Loggers.TestPassed
+	failed := h.config.Loggers.TestFailed
+
 	var err error
 	var errs []error
 	if h.Started() {
@@ -1207,9 +1285,9 @@ func (h *Holochain) Test() []error {
 
 	var lastResults [3]interface{}
 	for name, ts := range tests {
-		color.White("========================================")
-		color.White("Test: '%s' starting...", name)
-		color.White("========================================")
+		info.p("========================================")
+		info.pf("Test: '%s' starting...", name)
+		info.p("========================================")
 		// setup the genesis entries
 		err = h.Reset()
 		_, err = h.GenChain()
@@ -1218,69 +1296,68 @@ func (h *Holochain) Test() []error {
 		}
 		go h.dht.HandlePutReqs()
 		for i, t := range ts {
-			log.Debugf("------------------------------")
-			color.White("Test '%s' line %d: %s", name, i, t)
+			Debugf("------------------------------")
+			info.pf("Test '%s' line %d: %s", name, i, t)
 			time.Sleep(time.Millisecond * 10)
 			if err == nil {
 				testID := fmt.Sprintf("%s:%d", name, i)
 				input := t.Input
-				log.Debugf("Input before replacement: %s", input)
+				Debugf("Input before replacement: %s", input)
 				r1 := strings.Trim(fmt.Sprintf("%v", lastResults[0]), "\"")
 				r2 := strings.Trim(fmt.Sprintf("%v", lastResults[1]), "\"")
 				r3 := strings.Trim(fmt.Sprintf("%v", lastResults[2]), "\"")
 				input = h.TestStringReplacements(input, r1, r2, r3)
-				log.Debugf("Input after replacement: %s", input)
+				Debugf("Input after replacement: %s", input)
 				//====================
 				var actualResult, actualError = h.Call(t.Zome, t.FnName, input)
 				var expectedResult, expectedError = t.Output, t.Err
 				var expectedResultRegexp = t.Regexp
 				//====================
-				//log.Infof("Test: %s result:%v, Err:%v", testID, result, err)
 				lastResults[2] = lastResults[1]
 				lastResults[1] = lastResults[0]
 				lastResults[0] = actualResult
 				if expectedError != "" {
 					comparisonString := fmt.Sprintf("\nTest: %s\n\tExpected error:\t%v\n\tGot error:\t\t%v", testID, expectedError, actualError)
 					if actualError == nil || (actualError.Error() != expectedError) {
-						color.Red("\n=====================\n%s\n\tfailed! m(\n=====================", comparisonString)
+						failed.pf("\n=====================\n%s\n\tfailed! m(\n=====================", comparisonString)
 						err = fmt.Errorf(expectedError)
 					} else {
 						// all fine
-						log.Debugf("%s\n\tpassed :D", comparisonString)
+						Debugf("%s\n\tpassed :D", comparisonString)
 						err = nil
 					}
 				} else {
 					if actualError != nil {
 						errorString := fmt.Sprintf("\nTest: %s\n\tExpected:\t%s\n\tGot Error:\t\t%s\n", testID, expectedResult, actualError)
 						err = fmt.Errorf(errorString)
-						color.Red(fmt.Sprintf("\n=====================\n%s\n\tfailed! m(\n=====================", errorString))
+						failed.pf(fmt.Sprintf("\n=====================\n%s\n\tfailed! m(\n=====================", errorString))
 					} else {
 						var resultString = ToString(actualResult)
 						var match bool
 						var comparisonString string
 						if expectedResultRegexp != "" {
-							log.Debugf("Test %s matching against regexp...", testID)
+							Debugf("Test %s matching against regexp...", testID)
 							expectedResultRegexp = h.TestStringReplacements(expectedResultRegexp, r1, r2, r3)
 							comparisonString = fmt.Sprintf("\nTest: %s\n\tExpected regexp:\t%v\n\tGot:\t\t\t%v", testID, expectedResultRegexp, resultString)
 							var matchError error
 							match, matchError = regexp.MatchString(expectedResultRegexp, resultString)
 							//match, matchError = regexp.MatchString("[0-9]", "7")
 							if matchError != nil {
-								log.Infof(err.Error())
+								Infof(err.Error())
 							}
 						} else {
-							log.Debugf("Test %s matching against string...", testID)
+							Debugf("Test %s matching against string...", testID)
 							expectedResult = h.TestStringReplacements(expectedResult, r1, r2, r3)
 							comparisonString = fmt.Sprintf("\nTest: %s\n\tExpected:\t%v\n\tGot:\t\t%v", testID, expectedResult, resultString)
 							match = (resultString == expectedResult)
 						}
 
 						if match {
-							log.Debugf("%s\n\tpassed! :D", comparisonString)
-							color.Green("passed! ✔")
+							Debugf("%s\n\tpassed! :D", comparisonString)
+							passed.p("passed! ✔")
 						} else {
 							err = fmt.Errorf(comparisonString)
-							color.Red(fmt.Sprintf("\n=====================\n%s\n\tfailed! m(\n=====================", comparisonString))
+							failed.pf(fmt.Sprintf("\n=====================\n%s\n\tfailed! m(\n=====================", comparisonString))
 						}
 					}
 				}
@@ -1298,9 +1375,9 @@ func (h *Holochain) Test() []error {
 		}
 	}
 	if len(errs) == 0 {
-		color.Green(fmt.Sprintf("\n==================================================================\n\t\t+++++ All tests passed :D +++++\n=================================================================="))
+		passed.p(fmt.Sprintf("\n==================================================================\n\t\t+++++ All tests passed :D +++++\n=================================================================="))
 	} else {
-		color.Red(fmt.Sprintf("\n==================================================================\n\t\t+++++ %d test(s) failed :( +++++\n==================================================================", len(errs)))
+		failed.pf(fmt.Sprintf("\n==================================================================\n\t\t+++++ %d test(s) failed :( +++++\n==================================================================", len(errs)))
 	}
 	return errs
 }
@@ -1308,10 +1385,13 @@ func (h *Holochain) Test() []error {
 // GetProperty returns the value of a DNA property
 func (h *Holochain) GetProperty(prop string) (property string, err error) {
 	if prop == ID_PROPERTY {
+		ChangeAppProperty.Log()
 		property = h.DNAhash().String()
 	} else if prop == AGENT_ID_PROPERTY {
+		ChangeAppProperty.Log()
 		property = peer.IDB58Encode(h.id)
 	} else if prop == AGENT_NAME_PROPERTY {
+		ChangeAppProperty.Log()
 		property = string(h.Agent().Name())
 	} else {
 		property = h.Properties[prop]
