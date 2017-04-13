@@ -1,5 +1,5 @@
 FROM golang:1.7.5-alpine
-MAINTAINER Gerry Gleason && Christopher Reay
+MAINTAINER Gerry Gleason && Christopher Reay && Duke
 
 RUN apk add --update \
       ca-certificates \
@@ -27,8 +27,14 @@ RUN addgroup holochain -g 868 \
       GOBIN=/home/holochain/bin
   ENV PATH=$GOPATH/bin:/usr/local/go/bin:$GOBIN:$PATH
 
+  RUN mkdir /work/delve && \
+      cd /work/delve    && \
+      git clone https://github.com/derekparker/delve.git . && \
+      make install
+
   RUN go get -v -u github.com/whyrusleeping/gx
   RUN go get -v -d github.com/metacurrency/holochain
+
 
   WORKDIR /work/golang/src/github.com/metacurrency/holochain
   RUN make deps
