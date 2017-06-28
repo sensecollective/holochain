@@ -12,13 +12,19 @@ RUN apt-get update && apt-get install -y \
 && make -C "${GOPATH}/src/github.com/metacurrency/holochain" deps \
 && rm -rf ${GOPATH}/src/github.com/metacurrency/holochain
 
+#sudo doesnt work very well here as currently there is no $GOPATH set 
+#  for whatever environment sudo ends up with
+RUN useradd -mUu $uid holochain \
+&& adduser holochain sudo \
+&& sed -i -e'/%sudo/s/(ALL:ALL) ALL/(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
+
 # Use checked out version of holochain
 COPY . ${GOPATH}/src/github.com/metacurrency/holochain
 RUN make -C "${GOPATH}/src/github.com/metacurrency/holochain"
 
-RUN useradd -mUu $uid holochain \
-&& adduser holochain sudo \
-&& sed -i -e'/%sudo/s/(ALL:ALL) ALL/(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
+WORKDIR ${GOPATH}/src/github.com/metacurrency/holochain
+RUN make test && make hc && make bs && make hcdev
+
 USER holochain
 
 EXPOSE 3141
