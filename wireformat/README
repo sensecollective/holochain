@@ -1,0 +1,4 @@
+To rebuild the .go files in this directory from the .capnp files
+install Cap'n Proto and then run:
+
+capnp compile -I$GOPATH/src/zombiezen.com/go/capnproto2/std -ogo wireformat/*.capnp
