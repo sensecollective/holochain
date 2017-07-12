@@ -85,7 +85,7 @@ type Protocol struct {
 	Receiver ReceiverFn
 }
 
-var ValidateProtocol, GossipProtocol, ActionProtocol Protocol
+var ValidateProtocol, GossipProtocol, ActionProtocol, EntanglementProtocol Protocol
 
 type Router struct {
 	dummy int
@@ -302,6 +302,28 @@ func (node *Node) Send(proto Protocol, addr peer.ID, m *Message) (response Messa
 	if err != nil {
 		return
 	}
+	return
+}
+
+func (node *Node) SendRaw(proto Protocol, addr peer.ID, data []byte, readResponse func(io.Reader) error) (err error) {
+	s, err := node.Host.NewStream(context.Background(), addr, proto.ID)
+	if err != nil {
+		return
+	}
+	defer s.Close()
+
+	n, err := s.Write(data)
+	if err != nil {
+		return
+	}
+	if n != len(data) {
+		err = errors.New("unable to send all data")
+		if err != nil {
+			return
+		}
+	}
+
+	err = readResponse(s)
 	return
 }
 

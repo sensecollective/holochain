@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	peer "github.com/libp2p/go-libp2p-peer"
+	entangler "github.com/metacurrency/holochain/entangler"
 	"reflect"
 	"time"
 )
@@ -419,7 +420,7 @@ func (a *ActionGet) Do(h *Holochain) (response interface{}, err error) {
 		if err != nil {
 			return
 		}
-		resp := GetResp{Entry: entry}
+		resp := GetResp{}
 		mask := a.options.GetMask
 		if (mask & GetMaskEntryType) != 0 {
 			resp.EntryType = entryType
@@ -431,31 +432,16 @@ func (a *ActionGet) Do(h *Holochain) (response interface{}, err error) {
 		response = resp
 		return
 	}
-	rsp, err := h.dht.Send(a.req.H, GET_REQUEST, a.req)
-	if err != nil {
 
-		// follow the modified hash
-		if a.req.StatusMask == StatusDefault && err == ErrHashModified {
-			var hash Hash
-			hash, err = NewHash(rsp.(GetResp).FollowHash)
-			if err != nil {
-				return
-			}
-			req := GetReq{H: hash, StatusMask: StatusDefault, GetMask: a.options.GetMask}
-			modResp, err := NewGetAction(req, a.options).Do(h)
-			if err == nil {
-				response = modResp
-			}
-		}
-		return
-	}
-	switch t := rsp.(type) {
-	case GetResp:
-		response = t
-	default:
-		err = fmt.Errorf("expected GetResp response from GET_REQUEST, got: %T", t)
-		return
-	}
+	response, err = entangler.GetEntangler().Execute(
+		func(seg *capnp.Segment) {
+			getReq := NewGetRequest(seg)
+			getReq.SetHash(a.req.H)
+			getReq.SetStatusMask(a.options.StatusMask)
+			getReq.SetGetMask(a.options.GetMask)
+			return getReq
+		}).Get()
+
 	return
 }
 
